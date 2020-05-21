@@ -68,7 +68,7 @@
     _BENCH_accum += pow(_BENCH_all_results[_BENCH_aux] - _BENCH_average, 2); \
   _BENCH_std_dev = sqrt(_BENCH_accum/(NUM_REP-2)); \
   _BENCH_median = ((NUM_REP-2) % 2 == 0) ? (_BENCH_all_results[(NUM_REP-2)/2] + _BENCH_all_results[(NUM_REP-2)/2 + 1])/2 : _BENCH_all_results[(NUM_REP-2)/2 + 1];\
-  printf("["clause"] AVG_TIME = %f us, STD_DEV = %f us, MEDIAN = %f us, MAX_TIME = %ju us, MIN_TIME = %ju us", _BENCH_average, _BENCH_std_dev, _BENCH_median, _BENCH_all_results[NUM_REP-1], _BENCH_all_results[1]);
+  printf("["clause"] AVG_TIME = %f us, STD_DEV = %f us, MEDIAN = %f us, MAX_TIME = %ju us, MIN_TIME = %ju us\n", _BENCH_average, _BENCH_std_dev, _BENCH_median, _BENCH_all_results[NUM_REP-1], _BENCH_all_results[1]);
 
 #define BENCH_PRINT_VALUES \
   for (_BENCH_aux = 0; _BENCH_aux < NUM_REP; _BENCH_aux++) { printf("%ju", _BENCH_all_results[_BENCH_aux]); }
