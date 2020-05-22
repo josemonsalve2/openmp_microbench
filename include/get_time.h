@@ -7,7 +7,7 @@
 
 #include <stdio.h>
 
-#ifndef CUDA_CUPTI
+#if GET_TIME == 1
 #ifndef NUM_REP
 #define NUM_REP 3
 #endif
@@ -73,7 +73,8 @@
 #define BENCH_PRINT_VALUES \
   for (_BENCH_aux = 0; _BENCH_aux < NUM_REP; _BENCH_aux++) { printf("%ju", _BENCH_all_results[_BENCH_aux]); }
 
-#else // CUDA PROFILER VERSION
+#elif GET_TIME == 2
+// CUDA PROFILER VERSION
 
 #include <cuda.h>
 #include <cupti.h>
@@ -121,7 +122,30 @@ initTrace();
     printf("TEST_SUMMARY\t%s\t%s\t%s\t%lu\t%lu\n", BENCH_COMPILER_NAME, BENCH_COMPILER_VERSION, clause, testDuration, cudaDuration); \
     fflush(stdout); \
   } while (0);
-
+#else
+#define NUM_REP 1
+#define BENCH_GET_TIME(timer) 
+#define BENCH_PRINT_TIME_LAPSED(start, stop) 
+#define BENCH_INIT_TIMERS 
+#define BENCH_TIMING_LOAD 
+#define BENCH_START_TIMER 
+#define BENCH_STOP_TIMER 
+#define BENCH_GET_TIME_LAPSED
+#define BENCH_INIT_TEST 
+#define BENCH_REGISTER_TEST
+#define BENCH_TIMER_RESULT(clause) 
+#define BENCH_PRINT_VALUES 
+#define BENCH_GET_TIME(timer)
+#define BENCH_PRINT_TIME_LAPSED(start, stop) 
+#define BENCH_INIT_TIMERS 
+#define BENCH_TIMING_LOAD 
+#define BENCH_START_TIMER 
+#define BENCH_STOP_TIMER 
+#define BENCH_GET_TIME_LAPSED
+#define BENCH_INIT_TEST 
+#define BENCH_REGISTER_TEST 
+#define BENCH_TIMER_RESULT(clause) 
+#define BENCH_PRINT_VALUES 
 #endif
 
-#endif
+#endif /* GUARD */

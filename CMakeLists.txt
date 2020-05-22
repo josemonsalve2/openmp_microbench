@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 2.8.9)
-project (benchmarks)
+project(benchmarks)
 
 include_directories(include)
 
-if (CUDA_CUPTI)
+option(GET_TIME "If 1 we do regular timing measurement, if 2 we get CUPTI values (no repetitions), otherwise no timing meassurement" 0)
+add_definitions( -DGET_TIME=${GET_TIME})
+
+if (${GET_TIME} EQUAL 2)
   if( NOT CUDA_HOME)
     set(CUDA_HOME "/usr/lib/cuda")
   endif()
@@ -13,8 +16,8 @@ if (CUDA_CUPTI)
 endif()
 
 if (NUM_REP)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNUM_REP=${NUM_REP}")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DNUM_REP=${NUM_REP}")
+  add_definitions( -DNUM_REP=${NUM_REP})
+  add_definitions( -DNUM_REP=${NUM_REP})
 endif()
 
 set(CMAKE_CXX_COMPILER clang++)
