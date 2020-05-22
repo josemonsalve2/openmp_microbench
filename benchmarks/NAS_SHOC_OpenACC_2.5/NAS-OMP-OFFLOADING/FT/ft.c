@@ -71,6 +71,10 @@
 #include "randdp.h"
 #include "timers.h"
 #include "print_results.h"
+// Right now cuda graphs needs repetitions!
+#define SAFE_REPS 2
+double temp1;
+double temp2;
 
 //#define FFTBLOCKPAD_DEFAULT   33
 //#define FFTBLOCK_DEFAULT      32
@@ -213,49 +217,42 @@ int main(int argc, char *argv[])
   for (i = 1; i <= T_max; i++) {
     timer_clear(i);
   }
-  setup();
+  setup();  
+  
+  timer_start(T_total);
+  if (timers_enabled) timer_start(T_setup);
 ////#pragma acc data create(u0_real,u0_imag,u1_real,u1_imag,u_real,u_imag,\
 //        twiddle,gty1_real,gty1_imag, gty2_real, gty2_imag)
 
-#pragma omp target data map(to: u0_real, u0_imag, u1_real, u1_imag, twiddle)\
-        map (alloc: u_real,u_imag,\
-        gty1_real,gty1_imag, gty2_real, gty2_imag)
-  {
-    init_ui(dims[0], dims[1], dims[2]);
-    compute_indexmap(dims[0], dims[1], dims[2]);
-    compute_initial_conditions(dims[0], dims[1], dims[2]);
-    fft_init(dims[0]);
-    fft(1);
+// Right now cuda graphs needs repetitions!
+for (uint32_t safe_reps = 0; safe_reps < SAFE_REPS; safe_reps++) {
+    
+  #pragma omp target data map(to: u0_real, u0_imag, u1_real, u1_imag, twiddle)\
+          map (alloc: u_real,u_imag, temp1, temp2,\
+          gty1_real,gty1_imag, gty2_real, gty2_imag) \
+          map (from: sums)
+    {
+      init_ui(dims[0], dims[1], dims[2]);
+      compute_initial_conditions(dims[0], dims[1], dims[2]);
+      compute_indexmap(dims[0], dims[1], dims[2]);
+      fft_init(dims[0]);
+      fft(1);
 
-    //---------------------------------------------------------------------
-    // Start over from the beginning. Note that all operations must
-    // be timed, in contrast to other benchmarks.
-    //---------------------------------------------------------------------
-    for (i = 1; i <= T_max; i++) {
-      timer_clear(i);
+      for (iter = 1; iter <= niter; iter++) {
+        evolve(dims[0], dims[1], dims[2]);
+        fft(-1);
+        checksum(iter, dims[0], dims[1], dims[2]);
+      }
+
     }
+}
+  
+  verify(NX, NY, NZ, niter, &verified, &Class);
+  timer_stop(T_total);
+  total_time = timer_read(T_total);
 
-    timer_start(T_total);
-    if (timers_enabled) timer_start(T_setup);
-
-    compute_indexmap(dims[0], dims[1], dims[2]);
-
-    compute_initial_conditions(dims[0], dims[1], dims[2]);
-
-    fft_init(dims[0]);
-
-    fft(1);
-
-    for (iter = 1; iter <= niter; iter++) {
-      evolve(dims[0], dims[1], dims[2]);
-      fft(-1);
-      checksum(iter, dims[0], dims[1], dims[2]);
-    }
-
-    verify(NX, NY, NZ, niter, &verified, &Class);
-    timer_stop(T_total);
-    total_time = timer_read(T_total);
-  }
+  // Right now cuda graphs needs repetitions!
+  total_time /= SAFE_REPS;
 
   if (total_time != 0.0) {
     mflops = 1.0e-6 * (double)NTOTAL *
@@ -365,6 +362,7 @@ static void compute_initial_conditions(int d1, int d2, int d3)
   ////#pragma acc parallel num_gangs(d3/128) vector_length(128) present(u1_real,u1_imag) copyin(starts[0:d3])
   {
     ////#pragma acc loop gang vector
+    #pragma omp target teams distribute parallel for map(to:starts) map(alloc:u1_real, u1_imag)
     for (k = 0; k < d3; k++) {
       x0 = starts[k];
       for (j = 0; j < d2; j++) {
@@ -402,7 +400,7 @@ static void compute_initial_conditions(int d1, int d2, int d3)
     }
   }
 ////#pragma acc update device(u1_real,u1_imag)
-#pragma omp target update to(u1_real, u1_imag)
+//#pragma omp target update to(u1_real, u1_imag)
 }
 
 
@@ -565,14 +563,8 @@ static void fft_init(int n)
   int m, nu, ku, i, j, ln;
   double t, ti;
 
-  //---------------------------------------------------------------------
-  // Initialize the U array with sines and cosines in a manner that permits
-  // stride one access at each FFT iteration.
-  //---------------------------------------------------------------------
   nu = n;
   m = ilog2(n);
-  //u[0] = dcmplx(m, 0.0);
-
 #ifndef CRPL_COMP
 //#pragma acc parallel num_gangs(1) num_workers(1) vector_length(1) present(u_real,u_imag)
 #elif CRPL_COMP == 0
@@ -580,25 +572,30 @@ static void fft_init(int n)
 #endif
 #pragma omp target map(alloc: u_real,u_imag) 
   {
-//#pragma omp target update to(u_real,u_imag) 
-#pragma omp teams   
-  {
-    u_real[0] = m;
-    u_imag[0] = 0.0;
+  #pragma omp teams   
+    {
+    //---------------------------------------------------------------------
+    // Initialize the U array with sines and cosines in a manner that permits
+    // stride one access at each FFT iteration.
+    //---------------------------------------------------------------------
+    //u[0] = dcmplx(m, 0.0);
+  //#pragma omp target update to(u_real,u_imag) 
+      u_real[0] = m;
+      u_imag[0] = 0.0;
+    }
   }
-  }
+
   ku = 2;
   ln = 1;
 
   for (j = 1; j <= m; j++) {
     t = PI / ln;
-
 #ifndef CRPL_COMP
 //#pragma acc parallel num_gangs((ln+127)/128) vector_length(128) present(u_real,u_imag)
 #elif CRPL_COMP == 0
 //#pragma acc kernels present(u_real,u_imag)
 #endif
-#pragma omp target map(alloc: u_real,u_imag) map(to:t)
+#pragma omp target map(alloc: u_real,u_imag)
     {
 //#pragma acc loop gang vector independent
 #pragma omp teams distribute private(ti)  // JOSE CHANGED HERE
@@ -661,9 +658,8 @@ static void cffts1_pos(int is, int d1, int d2, int d3)
 //#pragma omp target update to (gty1_real,gty1_imag,gty2_real,gty2_imag,\
                              u1_real, u1_imag, u_real,u_imag) 
 //#pragma omp target update to ( u1_real, u1_imag, u_real,u_imag) 
-#pragma omp target map(alloc: gty1_real,gty1_imag,gty2_real,gty2_imag, u1_real, u1_imag)\
-                             map(to: /*u1_real, u1_imag,*/ u_real, u_imag)
-  {
+#pragma omp target map(alloc: gty1_real,gty1_imag,gty2_real,gty2_imag, u1_real, u1_imag)
+ {
 //#pragma acc loop gang independent
 #pragma omp /*target*/ teams distribute collapse(2)
     for (k = 0; k < d3; k++) {
@@ -788,8 +784,7 @@ static void cffts1_neg(int is, int d1, int d2, int d3)
 #endif
 //#pragma omp target update to (gty1_real,gty1_imag,gty2_real,gty2_imag,\
                              u1_real, u1_imag, u_real,u_imag) 
-#pragma omp target map ( alloc: u1_real, u1_imag, u_real,u_imag)\
-                   map(from: gty1_real, gty1_imag, gty2_real, gty2_imag) 
+#pragma omp target map ( alloc: u1_real, u1_imag, u_real,u_imag, gty1_real, gty1_imag, gty2_real, gty2_imag) 
   {
 //#pragma acc loop gang independent
 #pragma omp teams distribute collapse(2)
@@ -1430,14 +1425,8 @@ static void checksum(int i, int d1, int d2, int d3)
 {
 
   int j, q, r, s;
-  double temp1,temp2;
   // dcomplex chk = dcmplx(0.0, 0.0);
-  dcomplex chk;
-  chk.real = 0.0;
-  chk.imag = 0.0;
 
-  temp1 = 0.0;
-  temp2 = 0.0;
 
   ////#pragma acc update host(u1_real,u1_imag)
 #ifndef CRPL_COMP
@@ -1447,8 +1436,9 @@ static void checksum(int i, int d1, int d2, int d3)
 //#pragma acc kernels present(u1_real,u1_imag)
 #endif
 //#pragma omp target update to (u1_real, u1_imag)
-#pragma omp target map (alloc: u1_real, u1_imag) map(tofrom: temp1, temp2)
+#pragma omp target map (alloc: u1_real, u1_imag, temp1, temp2)
   {
+    temp1 = 0; temp2 = 0;
 //#pragma acc loop gang worker vector reduction(+:temp1,temp2)
   #pragma omp parallel for reduction(+:temp1,temp2) private(q,r,s)
 //#pragma omp teams distribute reduction(+:temp1,temp2) private(q,r,s)// This line does not work on GCC
@@ -1460,13 +1450,18 @@ static void checksum(int i, int d1, int d2, int d3)
       temp2 = temp2 + u1_imag[s*d2*(d1+1) + r*(d1+1) + q];
     }
   }
-  chk.real = temp1;
-  chk.imag = temp2;
+  // We saparate tehse  two in case we want to do teams distribute. It is not possible to sync teams distribute 
+  #pragma omp target map (alloc: temp1, temp2) 
+  {
+    dcomplex chk;
+    chk.real = temp1;
+    chk.imag = temp2;
 
-  chk = dcmplx_div2(chk, (double)(NTOTAL));
+    chk = dcmplx_div2(chk, (double)(NTOTAL));
 
-  printf(" T =%5d     Checksum =%22.12E%22.12E\n", i, chk.real, chk.imag);
-  sums[i] = chk;
+    printf(" T =%5d     Checksum =%22.12E%22.12E\n", i, chk.real, chk.imag);
+    sums[i] = chk;
+  }
 }
 
 
